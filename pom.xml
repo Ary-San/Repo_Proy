@@ -28,9 +28,32 @@
     </scm>
     <properties>
         <java.version>26</java.version>
+
+        <!--
+          Third-party versions are pinned here. All were checked against the OSV
+          database on 2026-09-20 and have no known advisories.
+
+          Spring-managed artifacts (validation, mail, thymeleaf, data-jpa,
+          security, webmvc) are deliberately NOT pinned: they inherit from the
+          spring-boot-starter-parent 4.1.1 BOM, and overriding one of them
+          breaks the version alignment the BOM guarantees.
+        -->
         <jjwt.version>0.13.0</jjwt.version>
         <modelmapper.version>3.2.6</modelmapper.version>
         <springdoc.version>3.1.1</springdoc.version>
+        <postgresql.version>42.7.13</postgresql.version>
+
+        <!--
+          Override of a BOM-managed version. Spring Boot 4.1.1 pins embedded
+          Tomcat 11.0.24, which carries three CRITICAL advisories:
+            GHSA-9xv2-5v5q-p794  DIGEST auth bypass
+            GHSA-gcx9-497g-6cp6  improper access control
+            GHSA-h3x4-894j-xpx5  FORM auth incorrect authorization
+          All three are fixed in 11.0.25. Boot 4.1.1 is the newest stable
+          release, so there is no upgrade that picks it up on its own.
+          Remove this line once a Boot release ships 11.0.25 or later.
+        -->
+        <tomcat.version>11.0.25</tomcat.version>
     </properties>
     <dependencies>
         <dependency>
@@ -69,10 +92,17 @@
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
 
-        <!-- Driver de PostgreSQL -->
+        <!--
+          PostgreSQL JDBC driver. Still required with Docker: the container runs
+          the database *server*, this is the *client* library the JVM needs to
+          speak its wire protocol. spring-boot-starter-data-jpa brings Hibernate
+          and HikariCP but no driver, so without this the app fails at startup
+          with "Failed to determine a suitable driver class".
+        -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
             <scope>runtime</scope>
         </dependency>
 
