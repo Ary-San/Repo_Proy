@@ -57,6 +57,11 @@ public class InvestmentPortfolio {
     @Builder.Default
     private List<PortfolioPosition> positions = new ArrayList<>();
 
+    /** Optimistic lock: both amounts are caches over the positions. */
+    @Version
+    @Column(nullable = false)
+    private Long version;
+
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;

@@ -24,6 +24,9 @@ public class TokenTransactionResponse {
 
     private Long referenceId;
 
+    /** Wallet balance once this entry was applied. */
+    private BigDecimal balanceAfter;
+
     private LocalDateTime createdAt;
 
 }

@@ -54,6 +54,17 @@ public class MinigameSession {
     @Column(nullable = false)
     private Integer score;
 
+    /**
+     * What the play actually cost, copied from Minigame.tokenCost when the
+     * session starts. The catalogue price is editable, so without this copy a
+     * past play cannot be reconstructed.
+     */
+    @NotNull
+    @DecimalMin("0")
+    @Column(name = "tokens_spent", nullable = false, precision = 19, scale = 2)
+    @Builder.Default
+    private BigDecimal tokensSpent = BigDecimal.ZERO;
+
     @NotNull
     @DecimalMin("0")
     @Column(name = "tokens_earned", nullable = false, precision = 19, scale = 2)

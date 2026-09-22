@@ -4,6 +4,7 @@ import com.checkout.backend.user.model.User;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PastOrPresent;
 import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -45,6 +46,7 @@ public class Expense {
     private BigDecimal amount;
 
     @NotNull
+    @PastOrPresent(message = "The date cannot be in the future")
     @Column(nullable = false)
     private LocalDate date;
 

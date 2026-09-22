@@ -62,7 +62,14 @@ public class User {
     @Builder.Default
     private Set<Role> roles = EnumSet.of(Role.USER);
 
-    /** Soft delete: deactivating a user must not destroy their financial history. */
+    /**
+     * Soft delete: deactivating a user must not destroy their financial history.
+     *
+     * The email stays unique across every status on purpose, so the address
+     * keeps identifying the same account. Coming back is a reactivation, not a
+     * new sign-up; registering again with a deactivated address is rejected and
+     * that is the intended behaviour, not an oversight.
+     */
     @NotNull
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

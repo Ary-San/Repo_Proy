@@ -80,6 +80,17 @@ public class TradeOrder {
     @Column(name = "tokens_moved", precision = 19, scale = 2)
     private BigDecimal tokensMoved;
 
+    /**
+     * Tokens per one unit of the asset currency at execution time. Frozen here
+     * because it is the only way to reproduce tokensMoved later: the rate moves
+     * and the order must stay auditable.
+     *
+     * tokensMoved = quantity * executionPrice * tokenRate
+     */
+    @DecimalMin(value = "0.0", inclusive = false)
+    @Column(name = "token_rate", precision = 19, scale = 8)
+    private BigDecimal tokenRate;
+
     @Size(max = 255)
     @Column(name = "rejection_reason", length = 255)
     private String rejectionReason;

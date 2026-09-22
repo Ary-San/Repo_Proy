@@ -22,6 +22,9 @@ public class ProjectionResponse {
 
     private String name;
 
+    /** Null when the projection is a standalone calculation. */
+    private Long savingsGoalId;
+
     private BigDecimal initialCapital;
 
     private BigDecimal monthlyContribution;

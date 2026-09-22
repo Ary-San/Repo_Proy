@@ -37,6 +37,11 @@ public class Savings {
     @Builder.Default
     private BigDecimal currentBalance = BigDecimal.ZERO;
 
+    /** Optimistic lock: currentBalance is a cache over incomes and expenses. */
+    @Version
+    @Column(nullable = false)
+    private Long version;
+
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;

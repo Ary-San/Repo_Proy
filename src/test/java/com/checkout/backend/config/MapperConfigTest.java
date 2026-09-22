@@ -8,6 +8,8 @@ import com.checkout.backend.minigame.dto.MinigameResponse;
 import com.checkout.backend.minigame.model.Minigame;
 import com.checkout.backend.minigame.model.MinigameStatus;
 import com.checkout.backend.minigame.model.MinigameType;
+import com.checkout.backend.projection.dto.ProjectionResponse;
+import com.checkout.backend.projection.model.Projection;
 import com.checkout.backend.savings.goal.dto.SavingsGoalResponse;
 import com.checkout.backend.savings.goal.model.SavingsGoal;
 import com.checkout.backend.savings.income.dto.IncomeResponse;
@@ -144,5 +146,30 @@ class MapperConfigTest {
         assertThat(response.getAccumulatedAmount()).isEqualByComparingTo("875.00");
         // progressPercent has no source in the entity: the mapper must not guess it.
         assertThat(response.getProgressPercent()).isNull();
+    }
+
+    @Test
+    @DisplayName("flattens the linked goal of a projection, and survives it being absent")
+    void flattensTheOptionalGoal() {
+        SavingsGoal goal = SavingsGoal.builder().id(11L).name("Laptop").build();
+
+        Projection linked = Projection.builder()
+                .id(1L).name("Plan laptop").savingsGoal(goal)
+                .initialCapital(new BigDecimal("500.00"))
+                .annualRate(new BigDecimal("0.082000"))
+                .periods(24)
+                .build();
+
+        Projection standalone = Projection.builder()
+                .id(2L).name("Calculo suelto")
+                .initialCapital(new BigDecimal("500.00"))
+                .annualRate(new BigDecimal("0.082000"))
+                .periods(24)
+                .build();
+
+        assertThat(modelMapper.map(linked, ProjectionResponse.class).getSavingsGoalId())
+                .isEqualTo(11L);
+        assertThat(modelMapper.map(standalone, ProjectionResponse.class).getSavingsGoalId())
+                .isNull();
     }
 }

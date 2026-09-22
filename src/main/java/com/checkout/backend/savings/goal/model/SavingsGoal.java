@@ -4,7 +4,6 @@ import com.checkout.backend.savings.goal.contribution.model.SavingsGoalContribut
 import com.checkout.backend.user.model.User;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.Future;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -17,6 +16,13 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * A savings goal is a virtual envelope over the money already counted in
+ * Savings, not a separate pot. accumulatedAmount is the part of the balance the
+ * user has committed to this goal, so the available balance is
+ * Savings.currentBalance minus the accumulated amount of every goal still
+ * IN_PROGRESS. Adding the balance and the goals together double counts.
+ */
 @Entity
 @Table(
         name = "savings_goals",
@@ -60,8 +66,13 @@ public class SavingsGoal {
     @Builder.Default
     private BigDecimal accumulatedAmount = BigDecimal.ZERO;
 
+    /**
+     * Only checked on the way in, by SavingsGoalRequest. A deadline in the past
+     * is a valid state for a stored goal: it is exactly the state that has to be
+     * written to mark it EXPIRED. Validating it here would make that update
+     * impossible, and the goal unreachable forever.
+     */
     @NotNull
-    @Future(message = "The deadline must be in the future")
     @Column(nullable = false)
     private LocalDate deadline;
 
@@ -79,6 +90,11 @@ public class SavingsGoal {
             orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
     private List<SavingsGoalContribution> contributions = new ArrayList<>();
+
+    /** Optimistic lock: accumulatedAmount is a cache over the contributions. */
+    @Version
+    @Column(nullable = false)
+    private Long version;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
