@@ -37,7 +37,7 @@ public class AssetQuote {
 
     @NotNull
     @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "asset_id", nullable = false,
+    @JoinColumn(name = "asset_id", nullable = false, unique = true,
             foreignKey = @ForeignKey(name = "fk_asset_quotes_asset"))
     private Asset asset;
 

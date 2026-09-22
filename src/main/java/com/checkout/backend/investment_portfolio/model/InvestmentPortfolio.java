@@ -35,7 +35,7 @@ public class InvestmentPortfolio {
 
     @NotNull
     @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false,
+    @JoinColumn(name = "user_id", nullable = false, unique = true,
             foreignKey = @ForeignKey(name = "fk_portfolios_user"))
     private User user;
 

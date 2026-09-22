@@ -34,7 +34,7 @@ public class TokenWallet {
 
     @NotNull
     @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false,
+    @JoinColumn(name = "user_id", nullable = false, unique = true,
             foreignKey = @ForeignKey(name = "fk_token_wallets_user"))
     private User user;
 
