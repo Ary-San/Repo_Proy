@@ -31,3 +31,18 @@ build/
 ### VS Code ###
 .vscode/
 
+
+### Secretos y configuracion local ###
+# La rubrica lo exige: no commitear .env, contrasenas ni API keys.
+# El proyecto maneja el secreto del JWT y la clave de Mboum.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+application-local.properties
+application-local.yml
+application-secrets.properties
+src/main/resources/application-local.*

@@ -1,28 +1,31 @@
-package com.checkout.backend.savings.expense.model;
+package com.checkout.backend.savings.goal.contribution.model;
 
-import com.checkout.backend.user.model.User;
+import com.checkout.backend.savings.goal.model.SavingsGoal;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+/**
+ * Ledger entry behind SavingsGoal.accumulatedAmount. Without it, the progress
+ * of a goal is a number nobody can audit.
+ */
 @Entity
 @Table(
-        name = "expenses",
-        indexes = @Index(name = "idx_expenses_user_date", columnList = "user_id, date")
+        name = "savings_goal_contributions",
+        indexes = @Index(name = "idx_goal_contributions_goal_created",
+                columnList = "savings_goal_id, created_at")
 )
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Expense {
+public class SavingsGoalContribution {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -30,27 +33,23 @@ public class Expense {
 
     @NotNull
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false,
-            foreignKey = @ForeignKey(name = "fk_expenses_user"))
-    private User user;
+    @JoinColumn(name = "savings_goal_id", nullable = false,
+            foreignKey = @ForeignKey(name = "fk_goal_contributions_goal"))
+    private SavingsGoal savingsGoal;
 
     @NotNull
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
-    private ExpenseCategory category;
-
-    @NotNull
-    @DecimalMin(value = "0.01", message = "The amount must be greater than zero")
+    @DecimalMin(value = "0.01", message = "The contribution must be greater than zero")
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
     @NotNull
-    @Column(nullable = false)
-    private LocalDate date;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private ContributionSource source;
 
-    @Size(max = 255)
-    @Column(length = 255)
-    private String description;
+    /** Soft reference to the income that funded the contribution, when any. */
+    @Column(name = "reference_id")
+    private Long referenceId;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -60,13 +59,13 @@ public class Expense {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof Expense other)) return false;
+        if (!(o instanceof SavingsGoalContribution other)) return false;
         return id != null && id.equals(other.id);
     }
 
     /** Constant on purpose: the hash must not change when the id is assigned on persist. */
     @Override
     public int hashCode() {
-        return Expense.class.hashCode();
+        return SavingsGoalContribution.class.hashCode();
     }
 }

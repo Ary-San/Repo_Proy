@@ -1,47 +1,99 @@
 package com.checkout.backend.projection.model;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.Id;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-import org.hibernate.annotations.UpdateTimestamp;
+import com.checkout.backend.user.model.User;
+import jakarta.persistence.*;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+/**
+ * A saved scenario of the savings calculator.
+ *
+ * Both results are stored because comparing simple against compound interest
+ * is the educational point of the app; a single result could not express it.
+ */
 @Entity
+@Table(
+        name = "projections",
+        indexes = @Index(name = "idx_projections_user_calculated",
+                columnList = "user_id, calculated_at")
+)
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class Projection {
+
     @Id
-    @GeneratedValue
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    @Column(nullable = false)
-    private Long userId;
-    @Column(nullable = false)
-    private String nombre;
-    @Column(nullable = false, precision = 19, scale = 2)
-    private BigDecimal capitalInicial;
-    @Column(nullable = false, precision = 19, scale = 2)
+
+    @NotNull
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false,
+            foreignKey = @ForeignKey(name = "fk_projections_user"))
+    private User user;
+
+    @NotBlank
+    @Size(max = 120)
+    @Column(nullable = false, length = 120)
+    private String name;
+
+    @NotNull
+    @DecimalMin("0")
+    @Column(name = "initial_capital", nullable = false, precision = 19, scale = 2)
+    private BigDecimal initialCapital;
+
+    @NotNull
+    @DecimalMin("0")
+    @Column(name = "monthly_contribution", nullable = false, precision = 19, scale = 2)
     @Builder.Default
-    private BigDecimal aporteMensual = BigDecimal.ZERO;
-    @Column(nullable = false, precision = 9, scale = 4)
-    private BigDecimal tasaAnual;
+    private BigDecimal monthlyContribution = BigDecimal.ZERO;
+
+    /** TEA as a rate between 0 and 1. The service converts it to a monthly rate. */
+    @NotNull
+    @DecimalMin("0.0")
+    @DecimalMax("1.0")
+    @Column(name = "annual_rate", nullable = false, precision = 7, scale = 6)
+    private BigDecimal annualRate;
+
+    @NotNull
+    @Min(1)
+    @Max(600)
     @Column(nullable = false)
-    private Integer periodos;
-    @Column(nullable = false, precision = 19, scale = 2)
-    private BigDecimal montoFinalSimple;
-    @Column(nullable = false, precision = 19, scale = 2)
-    private BigDecimal montoFinalCompuesto;
-    @UpdateTimestamp
-    @Column(nullable = false)
-    private LocalDateTime calculadaEn;
+    private Integer periods;
+
+    @Column(name = "simple_final_amount", precision = 19, scale = 2)
+    private BigDecimal simpleFinalAmount;
+
+    @Column(name = "compound_final_amount", precision = 19, scale = 2)
+    private BigDecimal compoundFinalAmount;
+
+    @CreationTimestamp
+    @Column(name = "calculated_at", nullable = false, updatable = false)
+    private LocalDateTime calculatedAt;
+
+    /** Identity is the primary key; two unsaved instances are only equal to themselves. */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Projection other)) return false;
+        return id != null && id.equals(other.id);
+    }
+
+    /** Constant on purpose: the hash must not change when the id is assigned on persist. */
+    @Override
+    public int hashCode() {
+        return Projection.class.hashCode();
+    }
 }

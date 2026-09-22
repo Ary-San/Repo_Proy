@@ -1,28 +1,26 @@
-package com.checkout.backend.savings.expense.model;
+package com.checkout.backend.token_wallet.refresh_token.model;
 
 import com.checkout.backend.user.model.User;
 import jakarta.persistence.*;
-import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(
-        name = "expenses",
-        indexes = @Index(name = "idx_expenses_user_date", columnList = "user_id, date")
+        name = "refresh_tokens",
+        uniqueConstraints = @UniqueConstraint(name = "uk_refresh_tokens_hash", columnNames = "token_hash"),
+        indexes = @Index(name = "idx_refresh_tokens_user", columnList = "user_id")
 )
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Expense {
+public class RefreshToken {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -31,42 +29,41 @@ public class Expense {
     @NotNull
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false,
-            foreignKey = @ForeignKey(name = "fk_expenses_user"))
+            foreignKey = @ForeignKey(name = "fk_refresh_tokens_user"))
     private User user;
 
-    @NotNull
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
-    private ExpenseCategory category;
+    /** Only the hash is stored, never the token itself. */
+    @NotBlank
+    @Column(name = "token_hash", nullable = false, length = 255)
+    private String tokenHash;
 
     @NotNull
-    @DecimalMin(value = "0.01", message = "The amount must be greater than zero")
-    @Column(nullable = false, precision = 19, scale = 2)
-    private BigDecimal amount;
+    @Column(name = "expires_at", nullable = false)
+    private LocalDateTime expiresAt;
 
-    @NotNull
-    @Column(nullable = false)
-    private LocalDate date;
-
-    @Size(max = 255)
-    @Column(length = 255)
-    private String description;
+    /** Null while the session is alive. Set on logout or revocation. */
+    @Column(name = "revoked_at")
+    private LocalDateTime revokedAt;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    public boolean isActive() {
+        return revokedAt == null && expiresAt.isAfter(LocalDateTime.now());
+    }
+
     /** Identity is the primary key; two unsaved instances are only equal to themselves. */
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof Expense other)) return false;
+        if (!(o instanceof RefreshToken other)) return false;
         return id != null && id.equals(other.id);
     }
 
     /** Constant on purpose: the hash must not change when the id is assigned on persist. */
     @Override
     public int hashCode() {
-        return Expense.class.hashCode();
+        return RefreshToken.class.hashCode();
     }
 }
