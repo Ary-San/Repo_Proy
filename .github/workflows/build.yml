@@ -1,0 +1,53 @@
+# Integracion continua.
+#
+# Corre en cada pull request y en cada push a main. El objetivo es que nadie
+# pueda mergear algo que no compila o cuyos tests fallan, sin depender de que
+# un humano se acuerde de correr `mvnw verify` antes de aprobar.
+#
+# El runner arranca limpio cada vez: clona el repositorio de cero y descarga las
+# dependencias de cero. Eso es lo que hace que "en mi maquina funciona" deje de
+# ser un argumento, y es justo lo que fallo cuando la propiedad java.version
+# estaba en 26: compilaba en caliente y reventaba en limpio.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: compilar y correr los tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar el JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          # Cachea ~/.m2 entre corridas. Sin esto cada build vuelve a bajar
+          # todas las dependencias y tarda varios minutos de mas.
+          cache: maven
+
+      # mvnw esta guardado con modo 100644, sin bit de ejecucion, porque se
+      # commiteo desde Windows. En Linux eso es "Permission denied".
+      - name: Dar permiso de ejecucion al wrapper
+        run: chmod +x ./mvnw
+
+      - name: Compilar y correr los tests
+        run: ./mvnw --batch-mode --no-transfer-progress verify
+
+      # Si el build falla, los reportes de surefire dicen que test se rompio y
+      # por que. Sin esto hay que adivinar leyendo el log.
+      - name: Guardar los reportes de test si algo falla
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
