@@ -12,6 +12,7 @@ import com.checkout.backend.savings.goal.dto.SavingsGoalResponse;
 import com.checkout.backend.savings.goal.model.SavingsGoal;
 import com.checkout.backend.savings.income.dto.IncomeResponse;
 import com.checkout.backend.savings.income.model.Income;
+import com.checkout.backend.user.dto.AuthResponse;
 import com.checkout.backend.user.dto.UserResponse;
 import com.checkout.backend.user.model.Role;
 import com.checkout.backend.user.model.User;
@@ -23,6 +24,7 @@ import org.modelmapper.ModelMapper;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.lang.reflect.Method;
 import java.util.EnumSet;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -144,5 +146,16 @@ class MapperConfigTest {
         assertThat(response.getAccumulatedAmount()).isEqualByComparingTo("875.00");
         // progressPercent has no source in the entity: the mapper must not guess it.
         assertThat(response.getProgressPercent()).isNull();
+    }
+
+    @Test
+    @DisplayName("the auth responses cannot be mutated after the service builds them")
+    void authResponsesExposeNoSetter() {
+        for (Class<?> dto : new Class<?>[]{UserResponse.class, AuthResponse.class}) {
+            assertThat(dto.getDeclaredMethods())
+                    .as("%s must stay read-only once built", dto.getSimpleName())
+                    .extracting(Method::getName)
+                    .noneMatch(name -> name.startsWith("set"));
+        }
     }
 }

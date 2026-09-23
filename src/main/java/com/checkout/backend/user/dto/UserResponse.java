@@ -9,13 +9,18 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 /**
  * Never exposes passwordHash. That omission is the whole point of the DTO.
  */
+/**
+ * Built once by the service with the builder and handed straight to Jackson.
+ * No setter on purpose: a response object that can still be mutated invites a
+ * controller to rewrite a field after the service already decided it, and that
+ * change is invisible in review. ModelMapper writes the private fields
+ * directly, which is why the mapping still works without them.
+ */
 @Getter
-@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder

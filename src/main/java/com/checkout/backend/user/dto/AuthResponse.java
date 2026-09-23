@@ -4,10 +4,13 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
+/**
+ * Built once by the authentication service and never mutated afterwards, so it
+ * exposes no setter. It is assembled by hand rather than mapped, because none
+ * of its fields come from a single entity.
+ */
 @Getter
-@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
