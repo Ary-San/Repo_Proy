@@ -8,6 +8,7 @@ import com.checkout.backend.user.model.UserStatus;
 import com.checkout.backend.user.repository.UserRepository;
 import java.util.List;
 import org.modelmapper.ModelMapper;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -69,7 +70,16 @@ public class UserService {
         refreshTokenService.revokeAll(user);
     }
 
-    /** Listado completo. Solo para administracion; ver el control en el controller. */
+    /**
+     * Listado completo de usuarios.
+     *
+     * El control de rol esta aqui ademas de en el controller, y la duplicacion
+     * es deliberada. La anotacion del controller protege una ruta; esta protege
+     * la operacion. El dia que otro punto del codigo llame a este metodo — una
+     * tarea programada, un endpoint nuevo, un listener de eventos — heredara la
+     * restriccion sin que nadie tenga que acordarse de repetirla.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
     @Transactional(readOnly = true)
     public List<UserResponse> listAll() {
         return userRepository.findAll().stream().map(this::toResponse).toList();

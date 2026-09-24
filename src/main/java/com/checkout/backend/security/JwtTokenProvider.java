@@ -19,10 +19,14 @@ import org.springframework.stereotype.Component;
 /**
  * Emite y valida los tokens de acceso.
  *
- * El token lleva el correo como subject y los roles como claim. Poner los roles
- * dentro evita una consulta a la base en cada peticion, y el precio es que un
- * cambio de rol no se aplica hasta que el token expira: por eso la vida del
- * token de acceso es corta.
+ * Lleva tres datos de identidad: el id del usuario en el claim uid, el correo
+ * como subject y los roles en el claim roles. El correo va en subject y no en un
+ * claim propio porque "sub" es precisamente el campo que el estandar reserva
+ * para identificar al sujeto del token; duplicarlo solo agrandaria el token.
+ *
+ * Los tres juntos permiten que el filtro reconstruya al usuario sin consultar la
+ * base en cada peticion. El precio es que un cambio de rol no se aplica hasta
+ * que el token expira, y por eso su vida es corta.
  *
  * Lo que el token NO lleva es nada sensible. Un JWT va firmado, no cifrado:
  * cualquiera que lo intercepte puede leer su contenido decodificando base64.
@@ -34,6 +38,12 @@ public class JwtTokenProvider {
 
     /** Nombre del claim con los roles. */
     private static final String ROLES_CLAIM = "roles";
+
+    /**
+     * Identificador del usuario. Se llama uid y no userId por convencion de JWT,
+     * donde los nombres son cortos porque el token viaja en cada peticion.
+     */
+    private static final String USER_ID_CLAIM = "uid";
 
     private final SecretKey key;
     private final JwtProperties properties;
@@ -54,6 +64,7 @@ public class JwtTokenProvider {
 
         return Jwts.builder()
                 .subject(user.getEmail())
+                .claim(USER_ID_CLAIM, user.getId())
                 .claim(ROLES_CLAIM, user.getRoles().stream().map(Enum::name).toList())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
@@ -92,6 +103,22 @@ public class JwtTokenProvider {
             log.debug("Token rechazado: {}", ex.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Id del usuario guardado en el token.
+     *
+     * Jackson deserializa el numero como Integer o Long segun su magnitud, asi
+     * que se lee como Number: castear directo a Long falla con los ids
+     * pequenos, que son justo los que aparecen en desarrollo y en los tests.
+     *
+     * Devuelve null si el claim no esta, lo que ocurre con un token emitido
+     * antes de que este claim existiera. Quien llama decide que hacer; aqui no
+     * se rompe la peticion por eso.
+     */
+    public Long extractUserId(Claims claims) {
+        Object raw = claims.get(USER_ID_CLAIM);
+        return raw instanceof Number number ? number.longValue() : null;
     }
 
     /**

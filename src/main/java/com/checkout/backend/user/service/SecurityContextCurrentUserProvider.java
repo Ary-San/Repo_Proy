@@ -1,6 +1,7 @@
 package com.checkout.backend.user.service;
 
 import com.checkout.backend.exceptions.UnauthenticatedException;
+import com.checkout.backend.security.JwtPrincipal;
 import com.checkout.backend.security.UserPrincipal;
 import com.checkout.backend.user.model.User;
 import com.checkout.backend.user.repository.UserRepository;
@@ -46,6 +47,15 @@ public class SecurityContextCurrentUserProvider implements CurrentUserProvider {
         // no toca la base a proposito, y entonces si hay que buscarla.
         if (authentication.getPrincipal() instanceof UserPrincipal principal) {
             return principal.getUser();
+        }
+
+        // Peticion autenticada por token: el claim uid evita buscar por correo.
+        // Es la misma fila, pero por clave primaria en vez de por un indice
+        // secundario, y es lo que hace que ese claim no sea decorativo.
+        if (authentication.getPrincipal() instanceof JwtPrincipal jwtPrincipal
+                && jwtPrincipal.id() != null) {
+            return userRepository.findById(jwtPrincipal.id())
+                    .orElseThrow(() -> new UnauthenticatedException("La sesion ya no es valida."));
         }
 
         return userRepository.findByEmail(authentication.getName())
