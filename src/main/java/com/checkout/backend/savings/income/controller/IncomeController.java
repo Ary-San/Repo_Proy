@@ -1,0 +1,79 @@
+package com.checkout.backend.savings.income.controller;
+
+import com.checkout.backend.savings.income.dto.IncomeRequest;
+import com.checkout.backend.savings.income.dto.IncomeResponse;
+import com.checkout.backend.savings.income.service.IncomeService;
+import com.checkout.backend.user.service.CurrentUserProvider;
+import jakarta.validation.Valid;
+import java.net.URI;
+import java.time.LocalDate;
+import java.util.List;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+
+/**
+ * Ingresos del usuario autenticado.
+ */
+@RestController
+@RequestMapping("/incomes")
+public class IncomeController {
+
+    private final IncomeService incomeService;
+    private final CurrentUserProvider currentUser;
+
+    public IncomeController(IncomeService incomeService, CurrentUserProvider currentUser) {
+        this.incomeService = incomeService;
+        this.currentUser = currentUser;
+    }
+
+    /**
+     * GET /api/v1/incomes?from=2026-01-01&to=2026-03-31
+     *
+     * El rango va en query params y no en la ruta porque filtra una coleccion
+     * que ya existe; no nombra un recurso distinto. @DateTimeFormat fija el
+     * formato ISO, de modo que una fecha mal escrita da 400 en el binding en vez
+     * de depender del locale del servidor.
+     */
+    @GetMapping
+    public ResponseEntity<List<IncomeResponse>> list(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ResponseEntity.ok(incomeService.list(currentUser.requireCurrentUser(), from, to));
+    }
+
+    /** GET /api/v1/incomes/{id} */
+    @GetMapping("/{id}")
+    public ResponseEntity<IncomeResponse> get(@PathVariable Long id) {
+        return ResponseEntity.ok(incomeService.get(currentUser.requireCurrentUser(), id));
+    }
+
+    /** POST /api/v1/incomes */
+    @PostMapping
+    public ResponseEntity<IncomeResponse> create(@Valid @RequestBody IncomeRequest request) {
+        IncomeResponse created = incomeService.create(currentUser.requireCurrentUser(), request);
+
+        URI location = ServletUriComponentsBuilder.fromCurrentRequest()
+                .path("/{id}")
+                .buildAndExpand(created.getId())
+                .toUri();
+
+        return ResponseEntity.created(location).body(created);
+    }
+
+    /** DELETE /api/v1/incomes/{id} */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        incomeService.delete(currentUser.requireCurrentUser(), id);
+        return ResponseEntity.noContent().build();
+    }
+
+}

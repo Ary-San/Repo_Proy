@@ -1,0 +1,118 @@
+package com.checkout.backend.savings.income.service;
+
+import com.checkout.backend.exceptions.InvalidRequestException;
+import com.checkout.backend.exceptions.ResourceNotFoundException;
+import com.checkout.backend.savings.income.dto.IncomeRequest;
+import com.checkout.backend.savings.income.dto.IncomeResponse;
+import com.checkout.backend.savings.income.model.Income;
+import com.checkout.backend.savings.income.repository.IncomeRepository;
+import com.checkout.backend.savings.service.SavingsService;
+import com.checkout.backend.user.model.User;
+import java.time.LocalDate;
+import java.util.List;
+import org.modelmapper.ModelMapper;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Ingresos del usuario.
+ *
+ * Registrar un ingreso mueve el saldo de ahorro. Sin eso currentBalance nunca
+ * cambiaria y el modulo entero seria un cuaderno de notas: el saldo es la suma
+ * de lo que entro menos lo que salio, y este es el lado que suma.
+ */
+@Service
+public class IncomeService {
+
+    private final IncomeRepository incomeRepository;
+    private final SavingsService savingsService;
+    private final ModelMapper mapper;
+
+    public IncomeService(IncomeRepository incomeRepository,
+                         SavingsService savingsService,
+                         ModelMapper mapper) {
+        this.incomeRepository = incomeRepository;
+        this.savingsService = savingsService;
+        this.mapper = mapper;
+    }
+
+    /**
+     * Registra un ingreso y lo suma al saldo.
+     *
+     * Las dos operaciones van en la misma transaccion: si el saldo no se puede
+     * actualizar, el ingreso tampoco queda guardado. Un ingreso registrado que
+     * no movio el saldo dejaria las dos cifras en desacuerdo sin que nadie se
+     * entere.
+     */
+    @Transactional
+    public IncomeResponse create(User user, IncomeRequest request) {
+        Income income = Income.builder()
+                .user(user)
+                .amount(request.getAmount())
+                .source(request.getSource())
+                .date(request.getDate())
+                .description(request.getDescription())
+                .build();
+
+        Income saved = incomeRepository.save(income);
+        savingsService.credit(user, saved.getAmount());
+        return mapper.map(saved, IncomeResponse.class);
+    }
+
+    /**
+     * Ingresos del usuario, del mas reciente al mas antiguo.
+     *
+     * El rango es opcional pero se pide completo: con un solo extremo no esta
+     * claro si el otro es el inicio de los tiempos o el dia de hoy, y cada
+     * cliente asumiria una cosa distinta.
+     */
+    @Transactional(readOnly = true)
+    public List<IncomeResponse> list(User user, LocalDate from, LocalDate to) {
+        List<Income> incomes;
+
+        if (from == null && to == null) {
+            incomes = incomeRepository.findByUserIdOrderByDateDesc(user.getId());
+        } else if (from == null || to == null) {
+            throw new InvalidRequestException(
+                    "Para filtrar por fecha hay que enviar 'from' y 'to', no solo uno.");
+        } else if (from.isAfter(to)) {
+            throw new InvalidRequestException("'from' no puede ser posterior a 'to'.");
+        } else {
+            incomes = incomeRepository.findByUserIdAndDateBetweenOrderByDateDesc(
+                    user.getId(), from, to);
+        }
+
+        return incomes.stream().map(income -> mapper.map(income, IncomeResponse.class)).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public IncomeResponse get(User user, Long id) {
+        return mapper.map(findOwned(user, id), IncomeResponse.class);
+    }
+
+    /**
+     * Borra el ingreso y deshace su efecto en el saldo.
+     *
+     * Puede fallar con 400, y es correcto que falle: si el dinero de ese ingreso
+     * ya esta comprometido en una meta, quitarlo dejaria la meta sin respaldo.
+     * El usuario tiene que liberar la meta primero.
+     */
+    @Transactional
+    public void delete(User user, Long id) {
+        Income income = findOwned(user, id);
+        savingsService.debit(user, income.getAmount());
+        incomeRepository.delete(income);
+    }
+
+    /**
+     * Busca el ingreso exigiendo que sea del usuario.
+     *
+     * Un ingreso de otro usuario da 404 y no 403 a proposito: un 403 confirmaria
+     * que ese id existe, y eso ya es informacion sobre datos ajenos.
+     */
+    private Income findOwned(User user, Long id) {
+        return incomeRepository.findByIdAndUserId(id, user.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Ingreso", id));
+    }
+
+}
