@@ -140,7 +140,15 @@ class DtoValidationTest {
                 arguments("registro con correo mal formado",
                         mutate(validRegister(), d -> d.setEmail("arroba-faltante")), "email"),
                 arguments("registro con contrasena de 7 caracteres",
-                        mutate(validRegister(), d -> d.setPassword("1234567")), "password"),
+                        mutate(validRegister(), d -> d.setPassword("Abc12!x")), "password"),
+                arguments("registro con contrasena sin mayuscula",
+                        mutate(validRegister(), d -> d.setPassword("clavesegura1!")), "password"),
+                arguments("registro con contrasena sin minuscula",
+                        mutate(validRegister(), d -> d.setPassword("CLAVESEGURA1!")), "password"),
+                arguments("registro con contrasena sin digito",
+                        mutate(validRegister(), d -> d.setPassword("ClaveSegura!")), "password"),
+                arguments("registro con contrasena sin caracter especial",
+                        mutate(validRegister(), d -> d.setPassword("ClaveSegura1")), "password"),
                 arguments("registro sin nombre", mutate(validRegister(), d -> d.setName(" ")), "name"),
                 arguments("registro con nombre de 121 caracteres",
                         mutate(validRegister(), d -> d.setName(tooLong(121))), "name"),
@@ -239,7 +247,30 @@ class DtoValidationTest {
     @DisplayName("a password of exactly eight characters is accepted")
     void acceptsThePasswordLowerBound() {
         // Guards the boundary itself: min = 8 must mean eight are enough.
-        assertThat(validator.validate(mutate(validRegister(), d -> d.setPassword("12345678"))))
+        // The eight have to satisfy the complexity rule too, which is why this
+        // is no longer "12345678": length and variety are separate rules and
+        // the boundary test must isolate the one it is about.
+        assertThat(validator.validate(mutate(validRegister(), d -> d.setPassword("Abc123!x"))))
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("a long password made of a single character class is still rejected")
+    void rejectsALongButWeakPassword() {
+        // Length alone is not strength: this is the case a plain @Size(min = 8)
+        // would have let through.
+        assertThat(validator.validate(
+                mutate(validRegister(), d -> d.setPassword("contrasenalarguisima"))))
+                .isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("the login request does not enforce the password policy")
+    void loginDoesNotEnforceThePasswordPolicy() {
+        // Deliberate: the policy belongs to registration. Enforcing it at login
+        // would lock out every account created before the rule existed, and
+        // would leak the policy to anyone probing the endpoint.
+        assertThat(validator.validate(mutate(validLogin(), d -> d.setPassword("vieja"))))
                 .isEmpty();
     }
 
@@ -280,7 +311,9 @@ class DtoValidationTest {
         return RegisterUserRequest.builder()
                 .name("Ary Sanchez")
                 .email("ary.sanchez@utec.edu.pe")
-                .password("unaClaveLarga")
+                // Cumple la politica de complejidad de RegisterUserRequest:
+                // minuscula, mayuscula, digito y caracter especial.
+                .password("ClaveSegura1!")
                 .birthDate(LocalDate.of(2003, 5, 14))
                 .build();
     }
