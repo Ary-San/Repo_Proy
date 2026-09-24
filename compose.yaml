@@ -2,9 +2,40 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: check-out
-    ports:
-      - "5433:5432"
+
+    # Docker Compose lee el .env del proyecto para estas sustituciones, que es
+    # el mismo archivo del que la aplicacion toma su configuracion. Asi el
+    # contenedor y la aplicacion no pueden desalinearse: antes el compose creaba
+    # la base con usuario postgres fijo mientras el .env podia decir otra cosa, y
+    # la conexion fallaba sin que quedara claro cual de los dos estaba mal.
+    # Los valores tras :- son el respaldo para quien todavia no tiene .env.
     environment:
-      POSTGRES_DB: check-out
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${DB_NAME:-check-out}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+
+    # 5433 en el host para no chocar con un PostgreSQL instalado en la maquina,
+    # que ya ocupa el 5432. Por eso DB_PORT es 5433 y no 5432.
+    ports:
+      - "${DB_PORT:-5433}:5432"
+
+    # Sin esto, Docker da el contenedor por listo en cuanto arranca el proceso,
+    # pero PostgreSQL abre el puerto antes de aceptar conexiones: la aplicacion
+    # puede intentar conectarse en esa ventana y fallar con "connection refused"
+    # de forma intermitente, que es de los errores mas molestos de diagnosticar.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-check-out}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    # Volumen con nombre: sin el, los datos viven en la capa del contenedor y
+    # desaparecen con un docker compose down. Hoy ddl-auto los borra igual en
+    # cada arranque, pero en cuanto eso pase a validate el volumen es lo que
+    # separa reiniciar de empezar de cero.
+    volumes:
+      - checkout-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  checkout-postgres-data:
