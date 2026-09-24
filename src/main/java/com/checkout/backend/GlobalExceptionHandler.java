@@ -43,7 +43,7 @@ import java.util.List;
 
 @Slf4j
 @RestControllerAdvice
-public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+public class GlobalExceptionHandler {
 
     private static final String INTERNAL_ERROR_MESSAGE =
             "An internal error occurred. Please try again later.";

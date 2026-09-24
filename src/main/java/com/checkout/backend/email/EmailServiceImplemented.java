@@ -17,8 +17,9 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-@Service
+
 @Slf4j
+@Service
 public class EmailServiceImplemented implements EmailService {
 
     @Autowired
