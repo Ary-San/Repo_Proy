@@ -84,7 +84,7 @@ class AuthenticationFlowTest {
         String body = mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Ana","email":"ana@utec.edu.pe","password":"secreto123"}
+                                {"name":"Ana","email":"ana@utec.edu.pe","password":"Secreto123!"}
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.accessToken").exists())
@@ -97,20 +97,20 @@ class AuthenticationFlowTest {
                 .andExpect(jsonPath("$.user.passwordHash").doesNotExist())
                 .andReturn().getResponse().getContentAsString();
 
-        assertThat(body).doesNotContain("secreto123");
+        assertThat(body).doesNotContain("Secreto123!");
     }
 
     @Test
     @DisplayName("La contrasena se guarda como hash BCrypt, nunca en claro")
     void passwordIsStoredHashed() throws Exception {
-        register("ana@utec.edu.pe", "secreto123");
+        register("ana@utec.edu.pe", "Secreto123!");
 
         User stored = userRepository.findByEmail("ana@utec.edu.pe").orElseThrow();
 
-        assertThat(stored.getPasswordHash()).isNotEqualTo("secreto123");
+        assertThat(stored.getPasswordHash()).isNotEqualTo("Secreto123!");
         // $2a$ es el prefijo del formato BCrypt; el coste va justo despues.
         assertThat(stored.getPasswordHash()).startsWith("$2a$");
-        assertThat(passwordEncoder.matches("secreto123", stored.getPasswordHash())).isTrue();
+        assertThat(passwordEncoder.matches("Secreto123!", stored.getPasswordHash())).isTrue();
     }
 
     @Test
@@ -119,7 +119,7 @@ class AuthenticationFlowTest {
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Ana","email":"ana@utec.edu.pe","password":"secreto123",
+                                {"name":"Ana","email":"ana@utec.edu.pe","password":"Secreto123!",
                                  "roles":["ADMIN"],"status":"ACTIVE"}
                                 """))
                 .andExpect(status().isCreated());
@@ -131,12 +131,12 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("409: un correo ya registrado")
     void duplicateEmailIsConflict() throws Exception {
-        register("ana@utec.edu.pe", "secreto123");
+        register("ana@utec.edu.pe", "Secreto123!");
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Otra Ana","email":"ana@utec.edu.pe","password":"otraclave1"}
+                                {"name":"Otra Ana","email":"ana@utec.edu.pe","password":"OtraClave1!"}
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409));
@@ -161,12 +161,12 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("200: login correcto")
     void loginSucceeds() throws Exception {
-        register("ana@utec.edu.pe", "secreto123");
+        register("ana@utec.edu.pe", "Secreto123!");
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"email":"ana@utec.edu.pe","password":"secreto123"}
+                                {"email":"ana@utec.edu.pe","password":"Secreto123!"}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").exists());
@@ -175,7 +175,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("401: el mensaje es el mismo con contrasena incorrecta y con correo inexistente")
     void loginFailuresAreIndistinguishable() throws Exception {
-        register("ana@utec.edu.pe", "secreto123");
+        register("ana@utec.edu.pe", "Secreto123!");
 
         String wrongPassword = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -188,7 +188,7 @@ class AuthenticationFlowTest {
         String unknownEmail = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"email":"nadie@utec.edu.pe","password":"secreto123"}
+                                {"email":"nadie@utec.edu.pe","password":"Secreto123!"}
                                 """))
                 .andExpect(status().isUnauthorized())
                 .andReturn().getResponse().getContentAsString();
@@ -220,7 +220,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("200: la misma ruta con un token valido")
     void protectedRouteWithTokenSucceeds() throws Exception {
-        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        String token = accessTokenOf(register("ana@utec.edu.pe", "Secreto123!"));
 
         mockMvc.perform(get("/api/v1/savings").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -230,7 +230,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("401: un token manipulado no pasa el filtro")
     void tamperedTokenIsRejected() throws Exception {
-        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        String token = accessTokenOf(register("ana@utec.edu.pe", "Secreto123!"));
         // Cambiar un caracter de la firma invalida el token entero.
         String tampered = token.substring(0, token.length() - 1)
                 + (token.endsWith("A") ? "B" : "A");
@@ -245,7 +245,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("401: un encabezado sin el esquema Bearer")
     void malformedAuthorizationHeaderIsRejected() throws Exception {
-        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        String token = accessTokenOf(register("ana@utec.edu.pe", "Secreto123!"));
 
         mockMvc.perform(get("/api/v1/savings").header("Authorization", token))
                 .andExpect(status().isUnauthorized());
@@ -254,7 +254,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("El esquema Bearer se acepta sin distinguir mayusculas, como pide el RFC 7235")
     void bearerSchemeIsCaseInsensitive() throws Exception {
-        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        String token = accessTokenOf(register("ana@utec.edu.pe", "Secreto123!"));
 
         mockMvc.perform(get("/api/v1/savings").header("Authorization", "bearer " + token))
                 .andExpect(status().isOk());
@@ -279,7 +279,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("El refresco entrega tokens nuevos y revoca el anterior")
     void refreshRotatesTheToken() throws Exception {
-        String first = register("ana@utec.edu.pe", "secreto123");
+        String first = register("ana@utec.edu.pe", "Secreto123!");
         String firstRefresh = fieldOf(first, "refreshToken");
 
         String second = mockMvc.perform(post("/api/v1/auth/refresh")
@@ -301,7 +301,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("Reutilizar un token ya rotado invalida tambien al nuevo")
     void reusingARotatedTokenRevokesTheFamily() throws Exception {
-        String first = register("ana@utec.edu.pe", "secreto123");
+        String first = register("ana@utec.edu.pe", "Secreto123!");
         String firstRefresh = fieldOf(first, "refreshToken");
 
         String second = mockMvc.perform(post("/api/v1/auth/refresh")
@@ -328,7 +328,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("204: el logout deja el token de refresco sin efecto")
     void logoutRevokesTheRefreshToken() throws Exception {
-        String refresh = fieldOf(register("ana@utec.edu.pe", "secreto123"), "refreshToken");
+        String refresh = fieldOf(register("ana@utec.edu.pe", "Secreto123!"), "refreshToken");
 
         mockMvc.perform(post("/api/v1/auth/logout")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -348,7 +348,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("403: un usuario normal no puede listar usuarios")
     void listingUsersRequiresAdmin() throws Exception {
-        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        String token = accessTokenOf(register("ana@utec.edu.pe", "Secreto123!"));
 
         mockMvc.perform(get("/api/v1/users").header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden())
@@ -363,11 +363,11 @@ class AuthenticationFlowTest {
         userRepository.save(User.builder()
                 .name("Alba")
                 .email("alba@utec.edu.pe")
-                .passwordHash(passwordEncoder.encode("secreto123"))
+                .passwordHash(passwordEncoder.encode("Secreto123!"))
                 .roles(EnumSet.of(Role.ADMIN))
                 .build());
 
-        String token = accessTokenOf(login("alba@utec.edu.pe", "secreto123"));
+        String token = accessTokenOf(login("alba@utec.edu.pe", "Secreto123!"));
 
         mockMvc.perform(get("/api/v1/users").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
@@ -376,8 +376,8 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("Cada usuario solo ve su propio perfil en /users/me")
     void meReturnsTheTokenOwner() throws Exception {
-        register("ana@utec.edu.pe", "secreto123");
-        String betoToken = accessTokenOf(register("beto@utec.edu.pe", "secreto123"));
+        register("ana@utec.edu.pe", "Secreto123!");
+        String betoToken = accessTokenOf(register("beto@utec.edu.pe", "Secreto123!"));
 
         mockMvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + betoToken))
                 .andExpect(status().isOk())
@@ -391,7 +391,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("El token lleva los tres datos de identidad: id, correo y roles")
     void tokenCarriesIdentityClaims() throws Exception {
-        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        String token = accessTokenOf(register("ana@utec.edu.pe", "Secreto123!"));
         Long expectedId = userRepository.findByEmail("ana@utec.edu.pe").orElseThrow().getId();
 
         Claims claims = tokenProvider.parseToken(token);
@@ -407,7 +407,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("El token declara su vencimiento y uno caducado no se acepta")
     void tokenDeclaresAndEnforcesExpiration() throws Exception {
-        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        String token = accessTokenOf(register("ana@utec.edu.pe", "Secreto123!"));
         Claims claims = tokenProvider.parseToken(token);
 
         assertThat(claims.getExpiration()).isAfter(claims.getIssuedAt());
@@ -433,8 +433,8 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("El id del token identifica al usuario sin consultar por correo")
     void requestsAreResolvedByTokenUserId() throws Exception {
-        register("ana@utec.edu.pe", "secreto123");
-        String betoToken = accessTokenOf(register("beto@utec.edu.pe", "secreto123"));
+        register("ana@utec.edu.pe", "Secreto123!");
+        String betoToken = accessTokenOf(register("beto@utec.edu.pe", "Secreto123!"));
         Long betoId = userRepository.findByEmail("beto@utec.edu.pe").orElseThrow().getId();
 
         Claims claims = tokenProvider.parseToken(betoToken);
@@ -451,7 +451,7 @@ class AuthenticationFlowTest {
     @Test
     @DisplayName("403: el servicio tambien exige ADMIN, no solo la ruta")
     void serviceLayerEnforcesTheRole() throws Exception {
-        register("ana@utec.edu.pe", "secreto123");
+        register("ana@utec.edu.pe", "Secreto123!");
         User ana = userRepository.findByEmail("ana@utec.edu.pe").orElseThrow();
 
         // Se llama al servicio directamente, saltandose el controller y su
