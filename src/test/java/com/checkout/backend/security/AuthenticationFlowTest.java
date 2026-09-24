@@ -1,0 +1,402 @@
+package com.checkout.backend.security;
+
+import com.checkout.backend.user.model.Role;
+import com.checkout.backend.user.model.User;
+import com.checkout.backend.user.repository.UserRepository;
+import java.util.EnumSet;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * Autenticacion completa con la cadena de filtros real.
+ *
+ * A diferencia del resto de los tests de la suite, este NO desactiva los
+ * filtros. Es la diferencia entre probar los controllers y probar la seguridad:
+ * con addFilters = false nunca se ejecutan ni el filtro JWT, ni el
+ * AuthenticationEntryPoint, ni el AccessDeniedHandler, que son justo las piezas
+ * que aqui importan. Un 401 que nace en un filtro no pasa por el
+ * @RestControllerAdvice, asi que tampoco se podria comprobar que su cuerpo tiene
+ * la forma del resto de los errores de la API.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
+@Transactional
+class AuthenticationFlowTest {
+
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    // ------------------------------------------------------------------
+    // Registro
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("201: el registro devuelve los dos tokens y nunca la contrasena")
+    void registerReturnsTokens() throws Exception {
+        String body = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Ana","email":"ana@utec.edu.pe","password":"secreto123"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.accessToken").exists())
+                .andExpect(jsonPath("$.refreshToken").exists())
+                .andExpect(jsonPath("$.tokenType").value("Bearer"))
+                .andExpect(jsonPath("$.expiresIn").value(900))
+                .andExpect(jsonPath("$.user.email").value("ana@utec.edu.pe"))
+                // UserResponse no tiene el campo, pero si alguien lo agregara
+                // este test lo detendria.
+                .andExpect(jsonPath("$.user.passwordHash").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).doesNotContain("secreto123");
+    }
+
+    @Test
+    @DisplayName("La contrasena se guarda como hash BCrypt, nunca en claro")
+    void passwordIsStoredHashed() throws Exception {
+        register("ana@utec.edu.pe", "secreto123");
+
+        User stored = userRepository.findByEmail("ana@utec.edu.pe").orElseThrow();
+
+        assertThat(stored.getPasswordHash()).isNotEqualTo("secreto123");
+        // $2a$ es el prefijo del formato BCrypt; el coste va justo despues.
+        assertThat(stored.getPasswordHash()).startsWith("$2a$");
+        assertThat(passwordEncoder.matches("secreto123", stored.getPasswordHash())).isTrue();
+    }
+
+    @Test
+    @DisplayName("El registro asigna ROLE USER; el rol no se puede pedir en el cuerpo")
+    void registrationAssignsUserRole() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Ana","email":"ana@utec.edu.pe","password":"secreto123",
+                                 "roles":["ADMIN"],"status":"ACTIVE"}
+                                """))
+                .andExpect(status().isCreated());
+
+        assertThat(userRepository.findByEmail("ana@utec.edu.pe").orElseThrow().getRoles())
+                .containsExactly(Role.USER);
+    }
+
+    @Test
+    @DisplayName("409: un correo ya registrado")
+    void duplicateEmailIsConflict() throws Exception {
+        register("ana@utec.edu.pe", "secreto123");
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Otra Ana","email":"ana@utec.edu.pe","password":"otraclave1"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409));
+    }
+
+    @Test
+    @DisplayName("400: una contrasena de menos de 8 caracteres")
+    void shortPasswordIsRejected() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Ana","email":"ana@utec.edu.pe","password":"corta"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'password')]").exists());
+    }
+
+    // ------------------------------------------------------------------
+    // Login
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("200: login correcto")
+    void loginSucceeds() throws Exception {
+        register("ana@utec.edu.pe", "secreto123");
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"ana@utec.edu.pe","password":"secreto123"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").exists());
+    }
+
+    @Test
+    @DisplayName("401: el mensaje es el mismo con contrasena incorrecta y con correo inexistente")
+    void loginFailuresAreIndistinguishable() throws Exception {
+        register("ana@utec.edu.pe", "secreto123");
+
+        String wrongPassword = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"ana@utec.edu.pe","password":"equivocada"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andReturn().getResponse().getContentAsString();
+
+        String unknownEmail = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"nadie@utec.edu.pe","password":"secreto123"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andReturn().getResponse().getContentAsString();
+
+        // Si los mensajes difirieran, el login serviria para averiguar que
+        // correos estan registrados.
+        assertThat(messageOf(wrongPassword)).isEqualTo(messageOf(unknownEmail));
+        assertThat(messageOf(wrongPassword)).doesNotContain("ana@utec.edu.pe");
+    }
+
+    // ------------------------------------------------------------------
+    // El filtro y la proteccion de rutas
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("401: una ruta protegida sin token, con el cuerpo estandar de la API")
+    void protectedRouteWithoutTokenIsUnauthorized() throws Exception {
+        mockMvc.perform(get("/api/v1/savings"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                // Este 401 nace en la cadena de filtros, no en un controller, asi
+                // que solo tiene esta forma gracias al AuthenticationEntryPoint.
+                .andExpect(jsonPath("$.timestamp").exists())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("Unauthorized"))
+                .andExpect(jsonPath("$.path").value("/api/v1/savings"));
+    }
+
+    @Test
+    @DisplayName("200: la misma ruta con un token valido")
+    void protectedRouteWithTokenSucceeds() throws Exception {
+        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+
+        mockMvc.perform(get("/api/v1/savings").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.currentBalance").value(0));
+    }
+
+    @Test
+    @DisplayName("401: un token manipulado no pasa el filtro")
+    void tamperedTokenIsRejected() throws Exception {
+        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        // Cambiar un caracter de la firma invalida el token entero.
+        String tampered = token.substring(0, token.length() - 1)
+                + (token.endsWith("A") ? "B" : "A");
+
+        mockMvc.perform(get("/api/v1/savings").header("Authorization", "Bearer " + tampered))
+                .andExpect(status().isUnauthorized())
+                // El motivo del rechazo no sale: diria a quien prueba tokens si
+                // fallo la firma o la fecha.
+                .andExpect(jsonPath("$.message").value(not(containsString("signature"))));
+    }
+
+    @Test
+    @DisplayName("401: un encabezado sin el esquema Bearer")
+    void malformedAuthorizationHeaderIsRejected() throws Exception {
+        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+
+        mockMvc.perform(get("/api/v1/savings").header("Authorization", token))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("El esquema Bearer se acepta sin distinguir mayusculas, como pide el RFC 7235")
+    void bearerSchemeIsCaseInsensitive() throws Exception {
+        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+
+        mockMvc.perform(get("/api/v1/savings").header("Authorization", "bearer " + token))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("Las rutas de autenticacion son publicas")
+    void authRoutesArePublic() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"nadie@utec.edu.pe","password":"loquesea"}
+                                """))
+                // 401 por credenciales, no por falta de token: la ruta se alcanzo.
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ------------------------------------------------------------------
+    // Refresh y logout
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("El refresco entrega tokens nuevos y revoca el anterior")
+    void refreshRotatesTheToken() throws Exception {
+        String first = register("ana@utec.edu.pe", "secreto123");
+        String firstRefresh = fieldOf(first, "refreshToken");
+
+        String second = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + firstRefresh + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(fieldOf(second, "refreshToken")).isNotEqualTo(firstRefresh);
+
+        // El token viejo ya no sirve: eso es lo que hace que uno robado tenga
+        // fecha de caducidad real.
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + firstRefresh + "\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Reutilizar un token ya rotado invalida tambien al nuevo")
+    void reusingARotatedTokenRevokesTheFamily() throws Exception {
+        String first = register("ana@utec.edu.pe", "secreto123");
+        String firstRefresh = fieldOf(first, "refreshToken");
+
+        String second = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + firstRefresh + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String secondRefresh = fieldOf(second, "refreshToken");
+
+        // Que reaparezca el viejo significa que alguien tiene una copia.
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + firstRefresh + "\"}"))
+                .andExpect(status().isUnauthorized());
+
+        // Ante esa sospecha cae la familia entera, incluido el token legitimo:
+        // el usuario vuelve a entrar y el atacante se queda sin nada.
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + secondRefresh + "\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("204: el logout deja el token de refresco sin efecto")
+    void logoutRevokesTheRefreshToken() throws Exception {
+        String refresh = fieldOf(register("ana@utec.edu.pe", "secreto123"), "refreshToken");
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + refresh + "\"}"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + refresh + "\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ------------------------------------------------------------------
+    // Autorizacion por rol
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("403: un usuario normal no puede listar usuarios")
+    void listingUsersRequiresAdmin() throws Exception {
+        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+
+        mockMvc.perform(get("/api/v1/users").header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.message")
+                        .value("No tienes permisos para realizar esta accion."));
+    }
+
+    @Test
+    @DisplayName("200: un ADMIN si puede listar usuarios")
+    void adminCanListUsers() throws Exception {
+        userRepository.save(User.builder()
+                .name("Alba")
+                .email("alba@utec.edu.pe")
+                .passwordHash(passwordEncoder.encode("secreto123"))
+                .roles(EnumSet.of(Role.ADMIN))
+                .build());
+
+        String token = accessTokenOf(login("alba@utec.edu.pe", "secreto123"));
+
+        mockMvc.perform(get("/api/v1/users").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("Cada usuario solo ve su propio perfil en /users/me")
+    void meReturnsTheTokenOwner() throws Exception {
+        register("ana@utec.edu.pe", "secreto123");
+        String betoToken = accessTokenOf(register("beto@utec.edu.pe", "secreto123"));
+
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + betoToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("beto@utec.edu.pe"));
+    }
+
+    // ------------------------------------------------------------------
+    // Utilidades
+    // ------------------------------------------------------------------
+
+    private String register(String email, String password) throws Exception {
+        return mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Usuario","email":"%s","password":"%s"}
+                                """.formatted(email, password)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+    }
+
+    private String login(String email, String password) throws Exception {
+        return mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"%s","password":"%s"}
+                                """.formatted(email, password)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+    }
+
+    private static String accessTokenOf(String authResponse) {
+        return fieldOf(authResponse, "accessToken");
+    }
+
+    private static String fieldOf(String json, String field) {
+        JsonNode node = JSON.readTree(json).get(field);
+        return node == null ? null : node.asString();
+    }
+
+    private static String messageOf(String errorJson) {
+        return fieldOf(errorJson, "message");
+    }
+
+}

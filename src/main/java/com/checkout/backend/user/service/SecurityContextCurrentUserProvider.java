@@ -1,6 +1,7 @@
 package com.checkout.backend.user.service;
 
 import com.checkout.backend.exceptions.UnauthenticatedException;
+import com.checkout.backend.security.UserPrincipal;
 import com.checkout.backend.user.model.User;
 import com.checkout.backend.user.repository.UserRepository;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -37,6 +38,14 @@ public class SecurityContextCurrentUserProvider implements CurrentUserProvider {
                 || !authentication.isAuthenticated()
                 || authentication instanceof AnonymousAuthenticationToken) {
             throw new UnauthenticatedException("Debes autenticarte para acceder a este recurso.");
+        }
+
+        // Cuando la autenticacion viene del login, el principal ya es el
+        // UserPrincipal y trae la entidad: usarla ahorra una consulta. Cuando
+        // viene del filtro JWT el principal es solo el correo, porque el filtro
+        // no toca la base a proposito, y entonces si hay que buscarla.
+        if (authentication.getPrincipal() instanceof UserPrincipal principal) {
+            return principal.getUser();
         }
 
         return userRepository.findByEmail(authentication.getName())
