@@ -28,6 +28,9 @@ public class ProjectionRequest {
     @Size(max = 120)
     private String name;
 
+    /** Optional: links the projection to the goal it is planning for. */
+    private Long savingsGoalId;
+
     @NotNull
     @DecimalMin("0")
     private BigDecimal initialCapital;

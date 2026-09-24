@@ -3,6 +3,7 @@ package com.checkout.backend.savings.expense.dto;
 import com.checkout.backend.savings.expense.model.ExpenseCategory;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PastOrPresent;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -28,6 +29,7 @@ public class ExpenseRequest {
     private BigDecimal amount;
 
     @NotNull
+    @PastOrPresent(message = "The date cannot be in the future")
     private LocalDate date;
 
     @Size(max = 255)

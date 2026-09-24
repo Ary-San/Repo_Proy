@@ -1,5 +1,6 @@
 package com.checkout.backend.projection.model;
 
+import com.checkout.backend.savings.goal.model.SavingsGoal;
 import com.checkout.backend.user.model.User;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.DecimalMax;
@@ -43,6 +44,15 @@ public class Projection {
     @JoinColumn(name = "user_id", nullable = false,
             foreignKey = @ForeignKey(name = "fk_projections_user"))
     private User user;
+
+    /**
+     * The goal this projection is planning for, when there is one. Optional on
+     * purpose: the screen also works as a standalone calculator.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "savings_goal_id",
+            foreignKey = @ForeignKey(name = "fk_projections_goal"))
+    private SavingsGoal savingsGoal;
 
     @NotBlank
     @Size(max = 120)

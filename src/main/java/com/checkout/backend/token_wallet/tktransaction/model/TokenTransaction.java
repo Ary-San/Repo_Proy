@@ -3,6 +3,7 @@ package com.checkout.backend.token_wallet.tktransaction.model;
 import com.checkout.backend.token_wallet.model.TokenWallet;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import org.hibernate.annotations.Check;
@@ -20,6 +21,9 @@ import java.time.LocalDateTime;
 @Entity
 @Table(
         name = "token_transactions",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_token_tx_reason_reference",
+                columnNames = {"reason", "reference_id"}),
         indexes = @Index(name = "idx_token_tx_wallet_created",
                 columnList = "token_wallet_id, created_at")
 )
@@ -51,9 +55,26 @@ public class TokenTransaction {
     @Column(nullable = false, length = 30)
     private TokenReason reason;
 
-    /** Soft reference to the goal, minigame session or order that caused it. */
+    /**
+     * Soft reference to the goal, minigame session or order that caused it. It
+     * cannot be a foreign key because the target changes with the reason, so
+     * the pair (reason, referenceId) is unique instead: a retry of the same
+     * operation hits the constraint rather than charging twice. It stays null
+     * for a manual ADJUSTMENT, and SQL treats nulls as distinct, so several
+     * adjustments are still allowed.
+     */
     @Column(name = "reference_id")
     private Long referenceId;
+
+    /**
+     * Wallet balance once this entry was applied. Makes the ledger auditable at
+     * any point in time and lets a drift from TokenWallet.tokenBalance be
+     * detected by reading a single row.
+     */
+    @NotNull
+    @DecimalMin("0")
+    @Column(name = "balance_after", nullable = false, precision = 19, scale = 2)
+    private BigDecimal balanceAfter;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

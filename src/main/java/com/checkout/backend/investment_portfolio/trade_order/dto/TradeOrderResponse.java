@@ -34,6 +34,9 @@ public class TradeOrderResponse {
 
     private BigDecimal tokensMoved;
 
+    /** Tokens per unit of the asset currency at execution time. */
+    private BigDecimal tokenRate;
+
     private String rejectionReason;
 
     private LocalDateTime createdAt;

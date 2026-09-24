@@ -21,6 +21,8 @@ public class MinigameSessionResponse {
 
     private Integer score;
 
+    private BigDecimal tokensSpent;
+
     private BigDecimal tokensEarned;
 
     private LocalDateTime playedAt;

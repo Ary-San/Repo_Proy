@@ -8,6 +8,9 @@ import com.checkout.backend.investment_portfolio.trade_order.dto.TradeOrderRespo
 import com.checkout.backend.investment_portfolio.trade_order.model.TradeOrder;
 import com.checkout.backend.minigame.session.dto.MinigameSessionResponse;
 import com.checkout.backend.minigame.session.model.MinigameSession;
+import com.checkout.backend.projection.dto.ProjectionResponse;
+import com.checkout.backend.projection.model.Projection;
+import com.checkout.backend.savings.goal.model.SavingsGoal;
 import org.modelmapper.ModelMapper;
 import org.modelmapper.config.Configuration.AccessLevel;
 import org.modelmapper.convention.MatchingStrategies;
@@ -31,6 +34,7 @@ import org.springframework.context.annotation.Configuration;
  * mapping; the service that builds the response has to compute them:
  *
  * <ul>
+ *   <li>SavingsResponse.committedAmount, availableBalance</li>
  *   <li>PortfolioResponse.unrealizedPnl</li>
  *   <li>PositionResponse.currentPrice, marketValue, unrealizedPnl</li>
  *   <li>ProjectionResponse.totalContributed, difference</li>
@@ -76,5 +80,12 @@ public class MapperConfig {
                 .addMappings(map ->
                         map.map(src -> src.getMinigame().getTitle(),
                                 MinigameSessionResponse::setMinigameTitle));
+
+        // The goal is optional, so this one has to survive a null association.
+        modelMapper.typeMap(Projection.class, ProjectionResponse.class)
+                .addMappings(map -> map.using(ctx -> {
+                    SavingsGoal goal = (SavingsGoal) ctx.getSource();
+                    return goal == null ? null : goal.getId();
+                }).map(Projection::getSavingsGoal, ProjectionResponse::setSavingsGoalId));
     }
 }
