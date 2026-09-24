@@ -1,1 +1,10 @@
-services: { }
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: check-out
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: check-out
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
