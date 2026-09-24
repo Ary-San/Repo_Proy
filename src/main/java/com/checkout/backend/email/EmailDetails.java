@@ -1,4 +1,5 @@
 package com.checkout.backend.email;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -7,7 +8,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class EmailDetails {
-
+    @NotNull
     private String recipient;
     private String msgBody;
     private String subject;
