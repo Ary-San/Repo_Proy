@@ -9,8 +9,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -57,17 +57,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * seguridad.
  */
 /*
- * controllers = WiringController.class acota el slice a este controller de
- * prueba. Sin esa restriccion @WebMvcTest escanea todos los @RestController de
- * la aplicacion, y los reales arrastran services y repositorios que este slice
- * no levanta: el contexto no arranca y el test falla por una razon que no tiene
- * nada que ver con lo que prueba. Acotarlo tambien lo vuelve estable frente a
- * los controllers que el proyecto agregue despues.
+ * Contexto completo y no un slice de @WebMvcTest.
  *
- * El advice sigue entrando igual: @WebMvcTest incluye los @ControllerAdvice
- * independientemente de esta lista, que es justo lo que hace valida la prueba.
+ * El slice parecia lo correcto por ser mas liviano, pero elige que beans carga
+ * por tipo: se lleva los filtros, porque son parte de la capa web, y deja fuera
+ * los @Component normales de los que esos filtros dependen. El resultado es que
+ * cada pieza nueva de la aplicacion puede romper este test por una razon que no
+ * tiene nada que ver con lo que prueba, y ya paso dos veces: primero con los
+ * services de los controllers, despues con el JwtTokenProvider del filtro JWT.
+ *
+ * Con el contexto completo eso no puede ocurrir: si la aplicacion arranca, este
+ * test arranca. Sigue probando exactamente lo mismo, y de hecho con mas valor,
+ * porque ahora el advice se comprueba en el contexto real y no en un recorte.
+ *
+ * addFilters = false quita la cadena de seguridad: lo que se prueba aqui es el
+ * manejo de excepciones, y la seguridad tiene su propio test que si la levanta.
  */
-@WebMvcTest(controllers = GlobalExceptionHandlerWiringTest.WiringController.class)
+@SpringBootTest
 @AutoConfigureMockMvc(addFilters = false)
 class GlobalExceptionHandlerWiringTest {
 

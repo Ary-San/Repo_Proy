@@ -1,0 +1,144 @@
+package com.checkout.backend.token_wallet.refresh_token.service;
+
+import com.checkout.backend.exceptions.UnauthenticatedException;
+import com.checkout.backend.security.JwtProperties;
+import com.checkout.backend.token_wallet.refresh_token.model.RefreshToken;
+import com.checkout.backend.token_wallet.refresh_token.repository.RefreshTokenRepository;
+import com.checkout.backend.user.model.User;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.time.LocalDateTime;
+import java.util.Base64;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Emite, valida y rota los tokens de refresco.
+ *
+ * El token de refresco es opaco, no un JWT: no tiene que transportar
+ * informacion, solo servir de llave contra una fila. Eso lo hace revocable, que
+ * es justo lo que el token de acceso no puede ser.
+ *
+ * En la tabla se guarda su SHA-256, nunca el token. Es el mismo criterio que
+ * con una contrasena: quien consiga leer la base no puede hacerse pasar por
+ * nadie. No lleva salt ni bcrypt porque el token ya es un valor aleatorio de 256
+ * bits, y contra eso un diccionario no sirve de nada.
+ */
+@Service
+public class RefreshTokenService {
+
+    private static final Logger log = LoggerFactory.getLogger(RefreshTokenService.class);
+
+    /** 32 bytes de entropia: adivinarlo no es un ataque viable. */
+    private static final int TOKEN_BYTES = 32;
+
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final JwtProperties properties;
+    private final SecureRandom random = new SecureRandom();
+
+    public RefreshTokenService(RefreshTokenRepository refreshTokenRepository,
+                               JwtProperties properties) {
+        this.refreshTokenRepository = refreshTokenRepository;
+        this.properties = properties;
+    }
+
+    /**
+     * Emite un token nuevo y guarda su hash.
+     *
+     * @return el token en claro, que es la unica vez que existe fuera del
+     *         cliente: despues de esto solo queda el hash
+     */
+    @Transactional
+    public String issue(User user) {
+        byte[] bytes = new byte[TOKEN_BYTES];
+        random.nextBytes(bytes);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+
+        refreshTokenRepository.save(RefreshToken.builder()
+                .user(user)
+                .tokenHash(hash(token))
+                .expiresAt(LocalDateTime.now().plus(properties.refreshTokenExpiration()))
+                .build());
+
+        return token;
+    }
+
+    /**
+     * Canjea un token por otro y devuelve su dueno.
+     *
+     * Rota siempre: el token entregado se revoca y se emite uno nuevo. Sin
+     * rotacion, un token robado sirve hasta que caduca; con rotacion, en cuanto
+     * el dueno legitimo lo usa el del ladron deja de valer.
+     *
+     * Reutilizar un token ya revocado revoca toda la familia del usuario. Es la
+     * senal clasica de que alguien tiene una copia: el legitimo ya lo roto y el
+     * viejo solo puede estar en manos de un tercero. Obliga a volver a entrar,
+     * que es el precio correcto ante esa sospecha.
+     */
+    @Transactional
+    public User rotate(String presentedToken) {
+        RefreshToken stored = refreshTokenRepository.findByTokenHash(hash(presentedToken))
+                .orElseThrow(() -> new UnauthenticatedException("El token de refresco no es valido."));
+
+        if (stored.getRevokedAt() != null) {
+            log.warn("Reutilizacion de un refresh token ya revocado del usuario {}. "
+                    + "Se revoca la familia completa.", stored.getUser().getId());
+            refreshTokenRepository.revokeAllByUserId(stored.getUser().getId(), LocalDateTime.now());
+            throw new UnauthenticatedException("El token de refresco no es valido.");
+        }
+
+        if (!stored.isActive()) {
+            throw new UnauthenticatedException("El token de refresco expiro.");
+        }
+
+        stored.setRevokedAt(LocalDateTime.now());
+        return stored.getUser();
+    }
+
+    /**
+     * Cierra la sesion revocando el token presentado.
+     *
+     * Un token desconocido no da error: el efecto que el cliente pide — que ese
+     * token deje de servir — ya se cumple. Responder distinto convertiria el
+     * logout en una forma de averiguar que tokens existen.
+     */
+    @Transactional
+    public void revoke(String presentedToken) {
+        refreshTokenRepository.findByTokenHash(hash(presentedToken))
+                .filter(token -> token.getRevokedAt() == null)
+                .ifPresent(token -> token.setRevokedAt(LocalDateTime.now()));
+    }
+
+    /** Revoca todo lo del usuario: cerrar sesion en todos los dispositivos. */
+    @Transactional
+    public int revokeAll(User user) {
+        return refreshTokenRepository.revokeAllByUserId(user.getId(), LocalDateTime.now());
+    }
+
+    /**
+     * SHA-256 en hexadecimal.
+     *
+     * El algoritmo esta en toda JVM, asi que la excepcion declarada no puede
+     * ocurrir; se convierte en un error de estado para no obligar a cada llamada
+     * a atrapar algo imposible.
+     */
+    private static String hash(String token) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 no esta disponible en esta JVM", ex);
+        }
+    }
+
+}
