@@ -1,6 +1,13 @@
 package com.checkout.backend.security;
 
 import com.checkout.backend.user.model.Role;
+import com.checkout.backend.user.service.UserService;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Date;
 import com.checkout.backend.user.model.User;
 import com.checkout.backend.user.repository.UserRepository;
 import java.util.EnumSet;
@@ -10,6 +17,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +28,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -51,6 +63,16 @@ class AuthenticationFlowTest {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtTokenProvider tokenProvider;
+
+    @Autowired
+    private UserService userService;
+
+    /** El mismo secreto que la aplicacion, para poder firmar un token de prueba. */
+    @Value("${checkout.jwt.secret}")
+    private String secret;
 
     // ------------------------------------------------------------------
     // Registro
@@ -360,6 +382,90 @@ class AuthenticationFlowTest {
         mockMvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + betoToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("beto@utec.edu.pe"));
+    }
+
+    // ------------------------------------------------------------------
+    // Contenido del token
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("El token lleva los tres datos de identidad: id, correo y roles")
+    void tokenCarriesIdentityClaims() throws Exception {
+        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        Long expectedId = userRepository.findByEmail("ana@utec.edu.pe").orElseThrow().getId();
+
+        Claims claims = tokenProvider.parseToken(token);
+
+        assertThat(claims).isNotNull();
+        assertThat(tokenProvider.extractUserId(claims)).isEqualTo(expectedId);
+        // El correo va en el subject, que es el campo que el estandar reserva
+        // para identificar al sujeto del token.
+        assertThat(claims.getSubject()).isEqualTo("ana@utec.edu.pe");
+        assertThat(tokenProvider.extractRoles(claims)).containsExactly(Role.USER);
+    }
+
+    @Test
+    @DisplayName("El token declara su vencimiento y uno caducado no se acepta")
+    void tokenDeclaresAndEnforcesExpiration() throws Exception {
+        String token = accessTokenOf(register("ana@utec.edu.pe", "secreto123"));
+        Claims claims = tokenProvider.parseToken(token);
+
+        assertThat(claims.getExpiration()).isAfter(claims.getIssuedAt());
+        assertThat(claims.getExpiration()).isCloseTo(
+                Date.from(claims.getIssuedAt().toInstant().plusSeconds(900)),
+                2000);
+
+        // Firmado con la misma clave pero ya vencido: lo unico invalido es la
+        // fecha, asi que si pasa, la expiracion no se esta comprobando.
+        String expired = Jwts.builder()
+                .subject("ana@utec.edu.pe")
+                .issuedAt(Date.from(Instant.now().minusSeconds(7200)))
+                .expiration(Date.from(Instant.now().minusSeconds(3600)))
+                .signWith(Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+
+        assertThat(tokenProvider.parseToken(expired)).isNull();
+
+        mockMvc.perform(get("/api/v1/savings").header("Authorization", "Bearer " + expired))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("El id del token identifica al usuario sin consultar por correo")
+    void requestsAreResolvedByTokenUserId() throws Exception {
+        register("ana@utec.edu.pe", "secreto123");
+        String betoToken = accessTokenOf(register("beto@utec.edu.pe", "secreto123"));
+        Long betoId = userRepository.findByEmail("beto@utec.edu.pe").orElseThrow().getId();
+
+        Claims claims = tokenProvider.parseToken(betoToken);
+        assertThat(tokenProvider.extractUserId(claims)).isEqualTo(betoId);
+
+        mockMvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + betoToken))
+                .andExpect(jsonPath("$.id").value(betoId));
+    }
+
+    // ------------------------------------------------------------------
+    // Permisos en la capa de servicio
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("403: el servicio tambien exige ADMIN, no solo la ruta")
+    void serviceLayerEnforcesTheRole() throws Exception {
+        register("ana@utec.edu.pe", "secreto123");
+        User ana = userRepository.findByEmail("ana@utec.edu.pe").orElseThrow();
+
+        // Se llama al servicio directamente, saltandose el controller y su
+        // anotacion: si la unica proteccion estuviera en la ruta, esto listaria
+        // todos los usuarios.
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(
+                        ana.getEmail(), null,
+                        UserPrincipal.authoritiesOf(ana.getRoles())));
+
+        assertThatThrownBy(() -> userService.listAll())
+                .isInstanceOf(AccessDeniedException.class);
+
+        SecurityContextHolder.clearContext();
     }
 
     // ------------------------------------------------------------------

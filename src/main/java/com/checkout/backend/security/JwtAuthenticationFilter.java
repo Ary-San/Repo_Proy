@@ -27,9 +27,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * la cadena de seguridad, no este filtro. Mezclar las dos cosas obligaria a
  * repetir aqui la lista de rutas publicas.
  *
- * No consulta la base: el correo y los roles salen del token ya firmado. Eso
- * evita un viaje a la base por peticion, con la contrapartida de que un cambio
- * de rol tarda en aplicarse lo que dure el token de acceso.
+ * No consulta la base: el id, el correo y los roles salen del token ya firmado.
+ * Eso evita un viaje a la base por peticion, con la contrapartida de que un
+ * cambio de rol tarda en aplicarse lo que dure el token de acceso.
  */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -58,10 +58,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             if (claims != null) {
                 Set<Role> roles = tokenProvider.extractRoles(claims);
+                JwtPrincipal principal = new JwtPrincipal(
+                        tokenProvider.extractUserId(claims), claims.getSubject());
 
                 UsernamePasswordAuthenticationToken authentication =
                         UsernamePasswordAuthenticationToken.authenticated(
-                                claims.getSubject(), null, UserPrincipal.authoritiesOf(roles));
+                                principal, null, UserPrincipal.authoritiesOf(roles));
                 authentication.setDetails(
                         new WebAuthenticationDetailsSource().buildDetails(request));
 
