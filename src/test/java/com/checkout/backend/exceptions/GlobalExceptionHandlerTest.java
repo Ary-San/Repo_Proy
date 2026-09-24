@@ -8,13 +8,19 @@ import jakarta.validation.ValidatorFactory;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +29,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
@@ -58,6 +65,17 @@ class GlobalExceptionHandlerTest {
                 .standaloneSetup(new ThrowingController())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+    }
+
+    /**
+     * El SecurityContextHolder guarda el Authentication en un ThreadLocal, y los
+     * tests de 401/403 lo escriben. Sin esta limpieza el que corre despues
+     * heredaria el usuario del anterior segun el orden de ejecucion, que JUnit no
+     * garantiza.
+     */
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -96,12 +114,47 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("403: acceso denegado sale con el formato estandar")
-    void accessDenied() throws Exception {
+    @DisplayName("401: acceso denegado sin usuario autenticado no es 403")
+    void accessDeniedWithoutAuthenticationIsUnauthorized() throws Exception {
+        // Sin Authentication en el contexto: el cliente no se identifico.
+        mockMvc.perform(get("/test/forbidden"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.message").value("Debes autenticarte para acceder a este recurso."));
+    }
+
+    @Test
+    @DisplayName("401: un token anonimo tampoco cuenta como autenticado")
+    void anonymousTokenIsNotAuthenticated() throws Exception {
+        // isAuthenticated() de un AnonymousAuthenticationToken devuelve true, asi
+        // que sin el chequeo de tipo este caso saldria 403.
+        SecurityContextHolder.getContext().setAuthentication(new AnonymousAuthenticationToken(
+                "key", "anonymousUser", AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS")));
+
+        mockMvc.perform(get("/test/forbidden"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Debes autenticarte para acceder a este recurso."));
+    }
+
+    @Test
+    @DisplayName("403: acceso denegado con usuario autenticado si es 403")
+    void accessDeniedWithAuthenticatedUserIsForbidden() throws Exception {
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(
+                        "ana@utec.edu.pe", null, AuthorityUtils.createAuthorityList("ROLE_USER")));
+
         mockMvc.perform(get("/test/forbidden"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.status").value(403))
                 .andExpect(jsonPath("$.message").value("No tienes permisos para realizar esta accion."));
+    }
+
+    @Test
+    @DisplayName("401: UnauthenticatedException propia")
+    void unauthenticatedException() throws Exception {
+        mockMvc.perform(get("/test/token-vencido"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("El token expiro."));
     }
 
     @Test
@@ -195,6 +248,38 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.message").value(not(containsString("jdbc:postgresql"))));
     }
 
+    @Test
+    @DisplayName("Una excepcion con status propio 4xx conserva su codigo y su motivo")
+    void responseStatusExceptionKeepsClientStatus() throws Exception {
+        mockMvc.perform(get("/test/gone"))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.status").value(410))
+                .andExpect(jsonPath("$.error").value("Gone"))
+                .andExpect(jsonPath("$.message").value("Esta meta fue eliminada."));
+    }
+
+    @Test
+    @DisplayName("Una excepcion con status propio 5xx conserva el codigo pero no el detalle")
+    void responseStatusExceptionMasksServerDetail() throws Exception {
+        mockMvc.perform(get("/test/bad-gateway"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.status").value(502))
+                .andExpect(jsonPath("$.message")
+                        .value("Ocurrio un error interno. Intentalo de nuevo mas tarde."))
+                // la direccion del servicio interno no puede salir
+                .andExpect(jsonPath("$.message").value(not(containsString("10.0.0.5"))));
+    }
+
+    @Test
+    @DisplayName("500: una path variable que el mapping no declara es un bug nuestro, no un 400")
+    void missingPathVariableIsServerError() throws Exception {
+        mockMvc.perform(get("/test/sin-plantilla"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.status").value(500))
+                .andExpect(jsonPath("$.message")
+                        .value("Ocurrio un error interno. Intentalo de nuevo mas tarde."));
+    }
+
     // ------------------------------------------------------------------
     // Andamiaje del test
     // ------------------------------------------------------------------
@@ -269,6 +354,31 @@ class GlobalExceptionHandlerTest {
 
         @GetMapping("/test/typed/{id}")
         void typed(@PathVariable Long id) {
+        }
+
+        @GetMapping("/test/token-vencido")
+        void tokenVencido() {
+            throw new UnauthenticatedException("El token expiro.");
+        }
+
+        @GetMapping("/test/gone")
+        void gone() {
+            throw new ResponseStatusException(HttpStatus.GONE, "Esta meta fue eliminada.");
+        }
+
+        @GetMapping("/test/bad-gateway")
+        void badGateway() {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "el servicio de cotizaciones en 10.0.0.5:8080 no responde");
+        }
+
+        /**
+         * La firma pide una path variable que la plantilla de la URI no declara.
+         * Spring lanza MissingPathVariableException, que es la unica subclase de
+         * MissingRequestValueException que no es culpa del cliente.
+         */
+        @GetMapping("/test/sin-plantilla")
+        void sinPlantilla(@PathVariable Long id) {
         }
 
         @GetMapping("/test/boom")

@@ -11,15 +11,29 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.context.MessageSourceResolvable;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.method.ParameterErrors;
+import org.springframework.validation.method.ParameterValidationResult;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingPathVariableException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingRequestValueException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -105,10 +119,43 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Falla una restriccion declarada directamente sobre un parametro del
+     * controller: un @Min en un @RequestParam, un @NotBlank en un @PathVariable.
+     *
+     * Desde Spring 6.1 este caso NO lanza ConstraintViolationException. El
+     * framework valida los parametros el mismo y lanza esta excepcion, asi que
+     * sin este handler el 400 se cae al handler de Exception y sale como 500.
+     *
+     * HandlerMethodValidationException hereda de ResponseStatusException, y su
+     * status ya es 400. Se lo maneja aparte igual porque el handler generico de
+     * ResponseStatusException no puede armar fieldErrors, y ese detalle es justo
+     * lo que el cliente necesita para saber que parametro corregir.
+     */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ErrorResponseDTO> handleMethodValidation(HandlerMethodValidationException ex,
+                                                                   HttpServletRequest request) {
+        List<FieldErrorDTO> fieldErrors = ex.getParameterValidationResults().stream()
+                .flatMap(result -> toFieldErrors(result).stream())
+                .toList();
+
+        log.debug("Validacion de parametros fallida en {}: {}", request.getRequestURI(), fieldErrors);
+
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponseDTO.of(
+                        HttpStatus.BAD_REQUEST,
+                        "La solicitud contiene parametros invalidos.",
+                        request.getRequestURI(),
+                        fieldErrors));
+    }
+
+    /**
      * Falla una restriccion declarada fuera de un @RequestBody: un @Min sobre un
-     * @PathVariable, o un @NotBlank sobre un @RequestParam. Spring no las agrupa
-     * en un BindingResult, asi que el detalle por campo hay que armarlo a mano
-     * desde el property path de cada violacion.
+     * bean anotado con @Validated fuera de la capa web, tipicamente un service.
+     * Esas violaciones no pasan por el mecanismo de arriba: las lanza el proxy de
+     * validacion de Spring, no el framework web, y no vienen agrupadas en un
+     * BindingResult, asi que el detalle por campo hay que armarlo desde el
+     * property path de cada violacion.
      */
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<ErrorResponseDTO> handleConstraintViolation(ConstraintViolationException ex,
@@ -154,6 +201,47 @@ public class GlobalExceptionHandler {
                                                                    HttpServletRequest request) {
         return build(HttpStatus.BAD_REQUEST,
                 "Falta el parametro obligatorio '" + ex.getParameterName() + "'.", request);
+    }
+
+    /**
+     * Falta un @RequestHeader obligatorio.
+     */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorResponseDTO> handleMissingHeader(MissingRequestHeaderException ex,
+                                                                HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST,
+                "Falta la cabecera obligatoria '" + ex.getHeaderName() + "'.", request);
+    }
+
+    /**
+     * Red para el resto de los valores de request obligatorios que puedan faltar
+     * (cookie, matrix variable, parte de un multipart).
+     *
+     * Los dos handlers de arriba son mas especificos y Spring los sigue
+     * eligiendo cuando corresponde; este solo atrapa lo que ellos no cubren, de
+     * modo que un valor faltante nuevo salga 400 en vez de caer al 500.
+     */
+    @ExceptionHandler(MissingRequestValueException.class)
+    public ResponseEntity<ErrorResponseDTO> handleMissingRequestValue(MissingRequestValueException ex,
+                                                                      HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST,
+                "Falta un valor obligatorio en la solicitud.", request);
+    }
+
+    /**
+     * Falta una path variable declarada en la firma del metodo.
+     *
+     * Es el unico MissingRequestValueException que NO es culpa del cliente:
+     * significa que el metodo pide una variable que su propio @GetMapping no
+     * declara. El cliente no puede corregirlo, asi que corresponde 500, y este
+     * handler existe para que la subclase no herede el 400 del anterior.
+     */
+    @ExceptionHandler(MissingPathVariableException.class)
+    public ResponseEntity<ErrorResponseDTO> handleMissingPathVariable(MissingPathVariableException ex,
+                                                                      HttpServletRequest request) {
+        log.error("Mapping invalido en {}: falta la path variable '{}' en la plantilla de la URI",
+                request.getRequestURI(), ex.getVariableName(), ex);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MESSAGE, request);
     }
 
     /**
@@ -203,6 +291,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponseDTO> handleAccessDenied(AccessDeniedException ex,
                                                                HttpServletRequest request) {
+        if (!isAuthenticated()) {
+            // Sin identidad no corresponde 403. Ese codigo afirma "se quien eres
+            // y no te alcanza", y aca no se sabe quien es: el cliente tiene que
+            // autenticarse, no pedir permisos. Es la misma distincion que hace
+            // Spring Security en su ExceptionTranslationFilter, que no llega a
+            // intervenir cuando el advice atrapa la excepcion primero.
+            log.debug("Acceso anonimo rechazado en {}", request.getRequestURI());
+            return build(HttpStatus.UNAUTHORIZED,
+                    "Debes autenticarte para acceder a este recurso.", request);
+        }
         log.debug("Acceso denegado en {}: {}", request.getRequestURI(), ex.getMessage());
         return build(HttpStatus.FORBIDDEN, "No tienes permisos para realizar esta accion.", request);
     }
@@ -223,6 +321,18 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * No hay handler y tampoco resource handler que atienda la URL. Cual de las
+     * dos excepciones sale depende de como este configurado el manejo de
+     * recursos estaticos, asi que se cubren las dos para que el 404 por ruta
+     * inexistente no dependa de esa configuracion.
+     */
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<ErrorResponseDTO> handleNoHandlerFound(NoHandlerFoundException ex,
+                                                                 HttpServletRequest request) {
+        return build(HttpStatus.NOT_FOUND, "La ruta solicitada no existe.", request);
+    }
+
+    /**
      * La ruta existe pero no para ese verbo, por ejemplo un DELETE contra un
      * endpoint que solo define GET.
      */
@@ -231,6 +341,40 @@ public class GlobalExceptionHandler {
                                                                      HttpServletRequest request) {
         return build(HttpStatus.METHOD_NOT_ALLOWED,
                 "El metodo " + ex.getMethod() + " no esta permitido en esta ruta.", request);
+    }
+
+    // ---------------------------------------------------------------------
+    // 406 / 415 - negociacion de contenido
+    // ---------------------------------------------------------------------
+
+    /**
+     * El Content-Type del cuerpo no es uno que la API pueda leer, tipicamente un
+     * POST con text/plain contra un endpoint que espera JSON.
+     *
+     * Sin este handler el caso caia en el de Exception y salia 500, que le dice
+     * al cliente que el servidor se rompio cuando en realidad mando mal la
+     * cabecera. Se listan los tipos aceptados porque es exactamente el dato que
+     * necesita para corregirlo.
+     */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ErrorResponseDTO> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex,
+                                                                        HttpServletRequest request) {
+        String supported = String.join(", ", ex.getSupportedMediaTypes().stream()
+                .map(Object::toString)
+                .toList());
+        String message = "El tipo de contenido '" + ex.getContentType() + "' no esta soportado."
+                + (supported.isEmpty() ? "" : " Se aceptan: " + supported + ".");
+        return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, message, request);
+    }
+
+    /**
+     * El cliente pidio en su Accept un formato que la API no produce.
+     */
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public ResponseEntity<ErrorResponseDTO> handleMediaTypeNotAcceptable(HttpMediaTypeNotAcceptableException ex,
+                                                                         HttpServletRequest request) {
+        return build(HttpStatus.NOT_ACCEPTABLE,
+                "Esta API solo responde en formato JSON.", request);
     }
 
     // ---------------------------------------------------------------------
@@ -254,6 +398,38 @@ public class GlobalExceptionHandler {
         log.warn("Violacion de integridad en {}", request.getRequestURI(), ex);
         return build(HttpStatus.CONFLICT,
                 "La operacion entra en conflicto con datos ya registrados.", request);
+    }
+
+    // ---------------------------------------------------------------------
+    // Excepciones que ya traen su codigo
+    // ---------------------------------------------------------------------
+
+    /**
+     * Excepcion que ya declara con que status quiere salir, sea lanzada por
+     * nosotros o por el propio framework.
+     *
+     * Sin este handler caia en el de Exception y se convertia en 500,
+     * descartando el codigo que la excepcion traia. El status se respeta, pero
+     * el mensaje solo se reenvia si es un 4xx: un 5xx con detalle propio entra en
+     * la misma regla que el resto de los 500 y sale con el texto generico.
+     */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ErrorResponseDTO> handleResponseStatus(ResponseStatusException ex,
+                                                                 HttpServletRequest request) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+        if (status == null) {
+            // Codigo no estandar: no hay reason phrase que poner en el DTO.
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
+
+        if (status.is5xxServerError()) {
+            log.error("Error con status propio en {} {}", request.getMethod(), request.getRequestURI(), ex);
+            return build(status, INTERNAL_ERROR_MESSAGE, request);
+        }
+
+        String message = ex.getReason() != null ? ex.getReason() : status.getReasonPhrase();
+        log.debug("Status propio {} en {}: {}", status.value(), request.getRequestURI(), message);
+        return build(status, message, request);
     }
 
     // ---------------------------------------------------------------------
@@ -286,6 +462,50 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(status)
                 .body(ErrorResponseDTO.of(status, message, request.getRequestURI()));
+    }
+
+    /**
+     * Saca los campos rechazados de un parametro que fallo la validacion de
+     * metodo.
+     *
+     * Hay dos formas posibles. Si el parametro es un objeto (un @ModelAttribute,
+     * un @RequestBody), el resultado es un ParameterErrors y trae FieldError, con
+     * el nombre real de cada campo adentro. Si es un valor suelto (un
+     * @RequestParam con @Min), no hay campos: el error es del parametro entero y
+     * el nombre se toma de su firma.
+     */
+    private static List<FieldErrorDTO> toFieldErrors(ParameterValidationResult result) {
+        if (result instanceof ParameterErrors errors) {
+            return errors.getFieldErrors().stream()
+                    .map(GlobalExceptionHandler::toFieldError)
+                    .toList();
+        }
+
+        String name = result.getMethodParameter().getParameterName();
+        return result.getResolvableErrors().stream()
+                .map(error -> new FieldErrorDTO(
+                        name != null ? name : "parametro",
+                        resolvableMessage(error)))
+                .toList();
+    }
+
+    private static String resolvableMessage(MessageSourceResolvable error) {
+        return error.getDefaultMessage() != null ? error.getDefaultMessage() : "Valor invalido.";
+    }
+
+    /**
+     * Si hay un usuario real detras del request.
+     *
+     * Un token anonimo no cuenta: Spring Security instala un
+     * AnonymousAuthenticationToken cuando nadie se autentico, de modo que el
+     * Authentication no es null y su isAuthenticated() devuelve true. Sin el
+     * chequeo de tipo, todo request sin credenciales pareceria autenticado.
+     */
+    private static boolean isAuthenticated() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null
+                && authentication.isAuthenticated()
+                && !(authentication instanceof AnonymousAuthenticationToken);
     }
 
     private static FieldErrorDTO toFieldError(FieldError error) {

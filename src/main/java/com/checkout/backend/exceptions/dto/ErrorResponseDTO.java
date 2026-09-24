@@ -14,11 +14,11 @@ import org.springframework.http.HttpStatus;
  * cambiar despues.
  *
  * Los cinco campos que pide el contrato son timestamp, status, error, message y
- * path. fieldErrors es un sexto campo opcional: cuando el 400 viene de Bean
- * Validation, decir solo "Validation failed" obliga al cliente a adivinar que
- * campo rechazo el servidor. Va anotado con @JsonInclude(NON_EMPTY), de modo que
- * desaparece del JSON en los errores que no son de validacion en vez de
- * aparecer como "fieldErrors": null.
+ * path, y los cinco aparecen siempre. fieldErrors es un sexto campo opcional:
+ * cuando el 400 viene de Bean Validation, decir solo "Validation failed" obliga
+ * al cliente a adivinar que campo rechazo el servidor. Es el unico anotado con
+ * @JsonInclude(NON_EMPTY), de modo que desaparece del JSON en los errores que no
+ * son de validacion en vez de aparecer como "fieldErrors": null.
  *
  * @param timestamp  momento en que se genero la respuesta, hora del servidor
  * @param status     codigo HTTP numerico, p. ej. 404
@@ -27,13 +27,20 @@ import org.springframework.http.HttpStatus;
  * @param path       URI que se pidio, sin el query string
  * @param fieldErrors detalle por campo cuando el error es de validacion
  */
-@JsonInclude(JsonInclude.Include.NON_EMPTY)
 public record ErrorResponseDTO(
         LocalDateTime timestamp,
         int status,
         String error,
         String message,
         String path,
+
+        /*
+         * La anotacion va sobre este componente y no sobre el record entero. A
+         * nivel de tipo aplica a los seis campos, y entonces un error cuyo
+         * mensaje quedara vacio se serializaria sin la clave "message",
+         * rompiendo el contrato de los cinco campos que siempre estan.
+         */
+        @JsonInclude(JsonInclude.Include.NON_EMPTY)
         List<FieldErrorDTO> fieldErrors
 ) {
 
