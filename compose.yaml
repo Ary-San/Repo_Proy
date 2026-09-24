@@ -7,4 +7,4 @@ services:
     environment:
       POSTGRES_DB: check-out
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: postgres
