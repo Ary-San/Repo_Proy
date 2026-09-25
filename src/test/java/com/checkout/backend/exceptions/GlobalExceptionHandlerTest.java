@@ -1,5 +1,6 @@
 package com.checkout.backend.exceptions;
 
+import com.checkout.backend.GlobalExceptionHandler;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Valid;
 import jakarta.validation.Validation;
