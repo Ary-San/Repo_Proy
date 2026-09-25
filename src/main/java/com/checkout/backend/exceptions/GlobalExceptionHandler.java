@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.context.MessageSourceResolvable;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -398,6 +399,50 @@ public class GlobalExceptionHandler {
         log.warn("Violacion de integridad en {}", request.getRequestURI(), ex);
         return build(HttpStatus.CONFLICT,
                 "La operacion entra en conflicto con datos ya registrados.", request);
+    }
+
+    // ---------------------------------------------------------------------
+    // 502 / 503 - el correo
+    // ---------------------------------------------------------------------
+
+    /**
+     * El servidor de correo rechazo el envio o no respondio.
+     *
+     * 502 y no 500: el fallo no esta en esta aplicacion sino en un servicio del
+     * que depende, y esa distincion importa para quien mira los logs o una
+     * alerta. El 500 dice "nuestro codigo se rompio"; el 502 dice "el de al lado
+     * no contesto", que se investiga en otro sitio.
+     *
+     * El mensaje es fijo y no el de la excepcion. Aqui se relaja el criterio de
+     * mensaje generico para 5xx solo porque este texto lo escribimos nosotros y
+     * no puede traer nada interno; el detalle de SMTP, que si puede incluir el
+     * servidor y la cuenta, se queda en el log.
+     */
+    @ExceptionHandler(EmailSenderException.class)
+    public ResponseEntity<ErrorResponseDTO> handleEmailSender(EmailSenderException ex,
+                                                              HttpServletRequest request) {
+        log.error("Fallo el envio de correo en {}", request.getRequestURI(), ex);
+        return build(HttpStatus.BAD_GATEWAY,
+                "No se pudo enviar el correo en este momento.", request);
+    }
+
+    /**
+     * La cola del executor de correo esta llena.
+     *
+     * 503 con esa semantica exacta: el servicio existe y funciona, pero ahora
+     * mismo no puede aceptar mas trabajo. Es el unico codigo que le dice al
+     * cliente que reintentar mas tarde tiene sentido, cosa que un 500 no dice.
+     *
+     * Va en WARN y no en ERROR: que la cola se llene es el mecanismo de
+     * proteccion haciendo su trabajo, no un defecto. Si aparece seguido, lo que
+     * hay que revisar es el tamano del pool.
+     */
+    @ExceptionHandler(TaskRejectedException.class)
+    public ResponseEntity<ErrorResponseDTO> handleTaskRejected(TaskRejectedException ex,
+                                                               HttpServletRequest request) {
+        log.warn("Cola de tareas llena en {}: {}", request.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.SERVICE_UNAVAILABLE,
+                "El servicio esta ocupado. Intentalo de nuevo en unos minutos.", request);
     }
 
     // ---------------------------------------------------------------------
